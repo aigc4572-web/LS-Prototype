@@ -193,6 +193,10 @@ export default function LockscreenPrototype() {
   const [slot2ScrollY, setSlot2ScrollY] = useState(0);
   const [isFollowed, setIsFollowed] = useState(false);
   const [followAnimPhase, setFollowAnimPhase] = useState(0);
+  const [slot1SubIndex, setSlot1SubIndex] = useState(0);
+  const [slot1SubTransitioning, setSlot1SubTransitioning] = useState(false);
+  const [slot1SubDir, setSlot1SubDir] = useState("left");
+  const pendingSubIndex = useRef(0);
   // 0 = not followed, 1 = button changed, 2 = scorecard sliding in, 3 = fully transitioned
   const animFrameRef = useRef(null);
   const pullStartTime = useRef(0);
@@ -267,11 +271,24 @@ export default function LockscreenPrototype() {
     }
   };
 
+  const navigateSubPage = (nextSub, direction = "left") => {
+    if (slot1SubTransitioning) return;
+    setSlot1SubDir(direction);
+    setSlot1SubTransitioning(true);
+    pendingSubIndex.current = nextSub;
+    setTimeout(() => {
+      setSlot1SubIndex(nextSub);
+      setTimeout(() => setSlot1SubTransitioning(false), 50);
+    }, 280);
+  };
+
   const navigateTo = (next, direction = "left", type = "horizontal") => {
     if (transitioning || next === currentScreen || next < 0 || next > 5) return;
     setTransDir(direction);
     setTransType(type);
     setTransitioning(true);
+    // Reset sub-index when leaving Slot 1
+    if (currentScreen === 1 && next !== 1) setSlot1SubIndex(0);
     const delay = type === "vertical" ? 30 : 280;
     setTimeout(() => {
       setCurrentScreen(next);
@@ -283,21 +300,50 @@ export default function LockscreenPrototype() {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
   };
-  const handleTouchEnd = (e) => {
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-    if (currentScreen === 1 && dy > 60 && Math.abs(dy) > Math.abs(dx) && pullProgress >= 1) {
+  const handleSwipe = (dx, dy) => {
+    // Vertical swipe down on Slot 1 when pull animation complete (non-subscribed)
+    if (currentScreen === 1 && !isFollowed && dy > 60 && Math.abs(dy) > Math.abs(dx) && pullProgress >= 1) {
       navigateTo(2, "down", "vertical");
       return;
     }
+    // Vertical scroll on Slot 2
     if (currentScreen === 2 && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 30) {
       scrollSlot2(dy < 0 ? 150 : -150);
       return;
     }
+    // Horizontal swipe handling
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+      // Subscribed Slot 1 sub-page navigation
+      if (currentScreen === 1 && isFollowed) {
+        if (dx < 0) {
+          // Swipe left
+          if (slot1SubIndex < 1) {
+            navigateSubPage(slot1SubIndex + 1, "left");
+          } else {
+            // Already on last sub-image, go to next screen
+            if (currentScreen < 5) navigateTo(currentScreen + 1, "left");
+          }
+        }
+        if (dx > 0) {
+          // Swipe right
+          if (slot1SubIndex > 0) {
+            navigateSubPage(slot1SubIndex - 1, "right");
+          } else {
+            // Already on first sub-image, go to previous screen
+            if (currentScreen > 0) navigateTo(currentScreen - 1, "right");
+          }
+        }
+        return;
+      }
       if (dx < 0 && currentScreen < 5) navigateTo(currentScreen + 1, "left");
       if (dx > 0 && currentScreen > 0) navigateTo(currentScreen - 1, "right");
     }
+  };
+
+  const handleTouchEnd = (e) => {
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    handleSwipe(dx, dy);
   };
   const handleMouseDown = (e) => { mouseStartX.current = e.clientX; mouseStartY.current = e.clientY; dragging.current = true; };
   const handleMouseUp = (e) => {
@@ -305,18 +351,7 @@ export default function LockscreenPrototype() {
     dragging.current = false;
     const dx = e.clientX - mouseStartX.current;
     const dy = e.clientY - mouseStartY.current;
-    if (currentScreen === 1 && dy > 60 && Math.abs(dy) > Math.abs(dx) && pullProgress >= 1) {
-      navigateTo(2, "down", "vertical");
-      return;
-    }
-    if (currentScreen === 2 && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 30) {
-      scrollSlot2(dy < 0 ? 150 : -150);
-      return;
-    }
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-      if (dx < 0 && currentScreen < 5) navigateTo(currentScreen + 1, "left");
-      if (dx > 0 && currentScreen > 0) navigateTo(currentScreen - 1, "right");
-    }
+    handleSwipe(dx, dy);
   };
 
   const scrollSlot2 = (delta) => {
@@ -358,10 +393,135 @@ export default function LockscreenPrototype() {
     </div>
   );
 
+  // Second subscribed article card (shown when swiping left from first subscribed image)
+  const renderSlot1Sub1 = () => (
+    <div style={{ height: "100%", position: "relative", overflow: "hidden", background: "#0a0a0a" }}>
+      {/* Background cricketer image - gradient overlay for readability */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: "linear-gradient(180deg, #1a1520 0%, #2d1f35 20%, #1a2530 50%, #0d1a12 80%, #0a0a0a 100%)",
+      }} />
+
+      {/* Cricketer silhouette/image area */}
+      <div style={{
+        position: "absolute", top: "8%", left: "50%", transform: "translateX(-50%)",
+        width: "75%", height: "45%",
+        background: "linear-gradient(160deg, rgba(0,55,130,0.4) 0%, rgba(0,40,100,0.3) 50%, rgba(0,80,50,0.2) 100%)",
+        borderRadius: 16,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        overflow: "hidden",
+      }}>
+        <div style={{
+          width: "100%", height: "100%",
+          background: "linear-gradient(135deg, #0d2847 0%, #1a3a5c 30%, #0f3520 70%, #0a2015 100%)",
+          display: "flex", alignItems: "flex-end", justifyContent: "center",
+        }}>
+          {/* Stylized cricket player silhouette */}
+          <div style={{
+            width: "60%", height: "85%",
+            background: "linear-gradient(180deg, rgba(0,70,160,0.6) 0%, rgba(0,50,120,0.8) 60%, rgba(0,30,80,0.4) 100%)",
+            borderRadius: "50% 50% 0 0",
+            position: "relative",
+          }}>
+            <div style={{
+              position: "absolute", top: "15%", left: "50%", transform: "translateX(-50%)",
+              fontSize: 48, opacity: 0.15, color: "#fff",
+            }}>🏏</div>
+          </div>
+        </div>
+      </div>
+
+      {/* RESURGENCE title */}
+      <div style={{
+        position: "absolute", top: "12%", left: 20, zIndex: 5,
+      }}>
+        <div style={{
+          fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: 4,
+          textTransform: "uppercase", lineHeight: 1,
+          textShadow: "0 2px 12px rgba(0,0,0,0.8)",
+        }}>RESURGENCE</div>
+      </div>
+
+      {/* #Jatin Sapru tag */}
+      <div style={{
+        position: "absolute", top: "18%", left: 20, zIndex: 5,
+      }}>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.7)",
+          background: "rgba(255,255,255,0.12)", borderRadius: 12, padding: "3px 10px",
+        }}>#Jatin Sapru</span>
+      </div>
+
+      {/* Main headline */}
+      <div style={{
+        position: "absolute", top: "54%", left: 16, right: 16, zIndex: 5,
+      }}>
+        <div style={{
+          fontSize: 17, fontWeight: 800, color: "#fff", lineHeight: 1.3,
+          textShadow: "0 1px 8px rgba(0,0,0,0.6)",
+        }}>Surya And Ishan Score Fifties To Level The Series</div>
+      </div>
+
+      {/* Bottom card - Cricket's Smartest Captains */}
+      <div style={{
+        position: "absolute", bottom: 60, left: 12, right: 12, zIndex: 5,
+        background: "rgba(30,30,35,0.9)", backdropFilter: "blur(12px)",
+        borderRadius: 14, padding: "14px 14px 12px", overflow: "hidden",
+      }}>
+        <div style={{
+          fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 5,
+        }}>Cricket's Smartest Captains</div>
+        <div style={{
+          fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.4, marginBottom: 10,
+        }}>A look at the tactical masterminds who have shaped the game with their strategic brilliance on the field.</div>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 16, color: "#ef4444" }}>♥</span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>10k</span>
+          </div>
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: "#fff",
+            background: "rgba(255,255,255,0.12)", borderRadius: 16, padding: "6px 16px",
+            cursor: "pointer",
+          }}>Read More</div>
+        </div>
+      </div>
+
+      {/* Sub-page dots indicator */}
+      <div style={{
+        position: "absolute", bottom: 38, left: 0, right: 0,
+        display: "flex", justifyContent: "center", gap: 6, zIndex: 10,
+      }}>
+        <div style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: "rgba(255,255,255,0.3)",
+          cursor: "pointer",
+        }} onClick={() => navigateSubPage(0, "right")} />
+        <div style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: "#fff",
+        }} />
+      </div>
+
+      {/* Draggable Live Scorecard Widget (sticky) */}
+      <DraggableScorecard />
+
+      {/* Side nav zones */}
+      <div onClick={() => { if (slot1SubIndex > 0) navigateSubPage(0, "right"); else navigateTo(0, "right"); }} style={{
+        position: "absolute", top: 0, left: 0, bottom: 0, width: "12%", cursor: "pointer", zIndex: 12,
+      }} />
+      <div onClick={() => navigateTo(2, "left")} style={{
+        position: "absolute", top: 0, right: 0, bottom: 0, width: "12%", cursor: "pointer", zIndex: 12,
+      }} />
+    </div>
+  );
+
   const renderSlot1 = () => {
     // When followed, show cricket content with draggable scorecard
     if (isFollowed) {
-      return (
+      const subContent = slot1SubIndex === 1 ? renderSlot1Sub1() : (
         <div style={{ height: "100%", position: "relative", overflow: "hidden" }}>
           <img src={IMG_SLOT1_FOLLOWED} alt="Slot 1 Cricket" draggable={false} style={{
             position: "absolute", inset: 0, width: "100%", height: "100%",
@@ -372,12 +532,41 @@ export default function LockscreenPrototype() {
           {/* Draggable Live Scorecard Widget */}
           <DraggableScorecard />
 
+          {/* Sub-page dots indicator */}
+          <div style={{
+            position: "absolute", bottom: 38, left: 0, right: 0,
+            display: "flex", justifyContent: "center", gap: 6, zIndex: 10,
+          }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#fff",
+            }} />
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "rgba(255,255,255,0.3)",
+              cursor: "pointer",
+            }} onClick={() => navigateSubPage(1, "left")} />
+          </div>
+
           <div onClick={() => navigateTo(0, "right")} style={{
             position: "absolute", top: 0, left: 0, bottom: 0, width: "12%", cursor: "pointer", zIndex: 12,
           }} />
-          <div onClick={() => navigateTo(2, "left")} style={{
+          <div onClick={() => navigateSubPage(1, "left")} style={{
             position: "absolute", top: 0, right: 0, bottom: 0, width: "12%", cursor: "pointer", zIndex: 12,
           }} />
+        </div>
+      );
+
+      return (
+        <div style={{ height: "100%", position: "relative", overflow: "hidden" }}>
+          <div style={{
+            height: "100%",
+            animation: slot1SubTransitioning
+              ? (slot1SubDir === "left" ? "slide-out-left 0.28s ease-in forwards" : "slide-out-right 0.28s ease-in forwards")
+              : (slot1SubDir === "left" ? "slide-in-left 0.28s ease-out" : "slide-in-right 0.28s ease-out"),
+          }}>
+            {subContent}
+          </div>
         </div>
       );
     }
